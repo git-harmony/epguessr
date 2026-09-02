@@ -9,6 +9,8 @@ import {
   epLabel,
   isEndless,
   isMiss,
+  playableEpisodes,
+  seasonsKey,
   hintWindow,
   loadBests,
   saveBest,
@@ -22,7 +24,6 @@ export default function App() {
   const [index, setIndex] = useState(null)
   const [indexError, setIndexError] = useState(null)
   const [session, setSession] = useState(null)
-  const [rounds, setRounds] = useState(10)
   const [bests, setBests] = useState(() => loadBests())
   // Bumped per game so <Game> always remounts fresh, even on an identical draw.
   const seq = useRef(0)
@@ -34,42 +35,48 @@ export default function App() {
       .catch((e) => setIndexError(e))
   }, [])
 
-  const startGame = useCallback(async (entry) => {
-    setSession({ loading: true, entry })
+  // Opening an anime loads its manifest, then hands off to the setup screen.
+  const openAnime = useCallback(async (entry) => {
+    setSession({ phase: 'loading', entry })
     try {
       const res = await fetch(asset(`data/${entry.id}.json`))
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const anime = await res.json()
-      const dealer = createDealer(anime)
-      const endless = isEndless(rounds)
-      // Endless deals as it goes; fixed games get the whole deck up front.
-      const opening = (endless ? [dealer.next()] : Array.from({ length: rounds }, () => dealer.next()))
-        .filter(Boolean)
-      seq.current += 1
-      setSession({
-        anime,
-        dealer,
-        opening,
-        endless,
-        roundCount: endless ? null : rounds,
-        rounds,
-        seq: seq.current,
-      })
+      setSession({ phase: 'setup', anime: await res.json() })
     } catch (e) {
-      setSession({ error: e, entry })
+      setSession({ phase: 'error', entry, error: e })
     }
-  }, [rounds])
+  }, [])
 
-  const finish = useCallback((anime, roundCount, score) => {
-    saveBest(anime.id, roundCount, score)
+  const start = useCallback((anime, rounds, seasons) => {
+    const dealer = createDealer(anime, seasons)
+    const endless = isEndless(rounds)
+    // Endless deals as it goes; fixed games get the whole deck up front.
+    const opening = (endless ? [dealer.next()] : Array.from({ length: rounds }, () => dealer.next()))
+      .filter(Boolean)
+    seq.current += 1
+    setSession({
+      phase: 'play',
+      anime,
+      dealer,
+      opening,
+      endless,
+      roundCount: endless ? null : rounds,
+      rounds,
+      seasons,
+      seq: seq.current,
+    })
+  }, [])
+
+  const finish = useCallback((anime, seasons, rounds, score) => {
+    saveBest(anime.id, seasonsKey(seasons, anime.seasons), rounds, score)
     setBests(loadBests())
   }, [])
 
   if (indexError || (index && index.length === 0)) return <NoData error={indexError} />
   if (!index) return <Splash>Loading…</Splash>
 
-  if (session?.loading) return <Splash>Loading {session.entry.title}…</Splash>
-  if (session?.error) {
+  if (session?.phase === 'loading') return <Splash>Loading {session.entry.title}…</Splash>
+  if (session?.phase === 'error') {
     return (
       <Splash>
         Couldn&apos;t load {session.entry.title}.
@@ -78,7 +85,19 @@ export default function App() {
     )
   }
 
-  if (session?.anime) {
+  if (session?.phase === 'setup') {
+    return (
+      <Setup
+        anime={session.anime}
+        bests={bests}
+        onStart={(rounds, seasons) => start(session.anime, rounds, seasons)}
+        onExit={() => setSession(null)}
+      />
+    )
+  }
+
+  if (session?.phase === 'play') {
+    const label = seasonsKey(session.seasons, session.anime.seasons)
     return (
       <Game
         key={session.seq}
@@ -87,23 +106,17 @@ export default function App() {
         opening={session.opening}
         endless={session.endless}
         roundCount={session.roundCount}
-        best={bests[bestKey(session.anime.id, session.rounds)] ?? 0}
-        onFinish={(score) => finish(session.anime, session.rounds, score)}
-        onReplay={() => startGame({ id: session.anime.id, title: session.anime.title })}
+        seasons={session.seasons}
+        best={bests[bestKey(session.anime.id, label, session.rounds)] ?? 0}
+        onFinish={(score) => finish(session.anime, session.seasons, session.rounds, score)}
+        onReplay={() => start(session.anime, session.rounds, session.seasons)}
+        onSetup={() => setSession({ phase: 'setup', anime: session.anime })}
         onExit={() => setSession(null)}
       />
     )
   }
 
-  return (
-    <Menu
-      animes={index}
-      rounds={rounds}
-      setRounds={setRounds}
-      bests={bests}
-      onPick={startGame}
-    />
-  )
+  return <Menu animes={index} onPick={openAnime} />
 }
 
 /* -------------------------------------------------------------- shell bits */
@@ -137,27 +150,13 @@ function NoData({ error }) {
 
 /* -------------------------------------------------------------------- menu */
 
-function Menu({ animes, rounds, setRounds, bests, onPick }) {
+function Menu({ animes, onPick }) {
   return (
     <div className="shell">
       <header className="masthead">
         <h1 className="wordmark">epguessr</h1>
         <p className="lede">One random frame. Name the episode it came from.</p>
       </header>
-
-      <div className="rounds-picker">
-        <span className="label">Rounds</span>
-        {ROUND_OPTIONS.map((n) => (
-          <button
-            key={n}
-            className={`chip ${rounds === n ? 'chip-on' : ''}`}
-            onClick={() => setRounds(n)}
-            title={n === ENDLESS ? `Endless — ${ENDLESS_LIVES} lives` : `${n} rounds`}
-          >
-            {n === ENDLESS ? '∞' : n}
-          </button>
-        ))}
-      </div>
 
       <div className="library">
         {animes.map((a) => (
@@ -172,9 +171,6 @@ function Menu({ animes, rounds, setRounds, bests, onPick }) {
                 {a.seasons?.length > 1 ? ` · ${a.seasons.length} seasons` : ''}
                 {a.frameCount ? ` · ${a.frameCount} frames` : ''}
               </span>
-              {bests[bestKey(a.id, rounds)] ? (
-                <span className="best small">best {bests[bestKey(a.id, rounds)].toLocaleString()}</span>
-              ) : null}
             </div>
           </button>
         ))}
@@ -183,9 +179,100 @@ function Menu({ animes, rounds, setRounds, bests, onPick }) {
   )
 }
 
+/* ------------------------------------------------------------------- setup */
+
+function Setup({ anime, bests, onStart, onExit }) {
+  const [rounds, setRounds] = useState(10)
+  const [picked, setPicked] = useState(() => anime.seasons)
+
+  const toggle = (season) => {
+    setPicked((prev) => {
+      // Never let the player start with nothing selected.
+      if (prev.includes(season)) {
+        const next = prev.filter((s) => s !== season)
+        return next.length ? next : prev
+      }
+      return [...prev, season].sort((a, b) => a - b)
+    })
+  }
+
+  const allOn = picked.length === anime.seasons.length
+  const inPlay = playableEpisodes(anime, picked)
+  const frames = inPlay.reduce((n, e) => n + e.frames.length, 0)
+  const best = bests[bestKey(anime.id, seasonsKey(picked, anime.seasons), rounds)]
+  const tooFew = !isEndless(rounds) && inPlay.length > 0 && rounds > frames
+
+  return (
+    <div className="shell">
+      <header className="masthead">
+        <h1 className="wordmark setup-title">{anime.title}</h1>
+        <p className="lede">{inPlay.length} episodes in play · {frames} frames</p>
+      </header>
+
+      <section className="setup-block">
+        <h2 className="setup-label">Rounds</h2>
+        <div className="chip-row">
+          {ROUND_OPTIONS.map((n) => (
+            <button
+              key={n}
+              className={`chip ${rounds === n ? 'chip-on' : ''}`}
+              onClick={() => setRounds(n)}
+              title={n === ENDLESS ? `Endless — ends on your first miss` : `${n} rounds`}
+            >
+              {n === ENDLESS ? '∞ endless' : n}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {anime.seasons.length > 1 ? (
+        <section className="setup-block">
+          <h2 className="setup-label">Seasons</h2>
+          <div className="chip-row">
+            <button
+              className={`chip ${allOn ? 'chip-on' : ''}`}
+              onClick={() => setPicked(anime.seasons)}
+            >
+              All
+            </button>
+            {anime.seasons.map((season) => {
+              const count = anime.episodes.filter((e) => e.season === season).length
+              return (
+                <button
+                  key={season}
+                  className={`chip ${picked.includes(season) ? 'chip-on' : ''}`}
+                  onClick={() => toggle(season)}
+                  title={`${count} episodes`}
+                >
+                  Season {season}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <div className="submit-bar">
+        <button className="btn ghost" onClick={onExit}>← library</button>
+        <button className="btn primary" onClick={() => onStart(rounds, picked)} disabled={!frames}>
+          Play
+        </button>
+      </div>
+
+      <p className="muted small centre-text">
+        {best ? `Best for this setup: ${best.toLocaleString()}` : 'No score yet for this setup'}
+        {tooFew ? ' · fewer frames than rounds, so some will repeat' : ''}
+      </p>
+    </div>
+  )
+}
+
 /* -------------------------------------------------------------------- game */
 
-function Game({ anime, dealer, opening, endless, roundCount, best, onFinish, onReplay, onExit }) {
+function Game({
+  anime, dealer, opening, endless, roundCount, seasons,
+  best, onFinish, onReplay, onSetup, onExit,
+}) {
   const [deck, setDeck] = useState(opening)
   const [roundIndex, setRoundIndex] = useState(0)
   const [selected, setSelected] = useState(null)
@@ -197,7 +284,9 @@ function Game({ anime, dealer, opening, endless, roundCount, best, onFinish, onR
   const bestBefore = useRef(best)
 
   const current = deck[roundIndex]
-  const multiSeason = anime.seasons.length > 1
+  const inPlay = useMemo(() => playableEpisodes(anime, seasons), [anime, seasons])
+  // Only worth naming the season when more than one is in play.
+  const multiSeason = seasons.length > 1
   const score = history.reduce((n, h) => n + h.points, 0)
   const livesLeft = ENDLESS_LIVES - history.filter((h) => isMiss(h.distance)).length
   // A miss showing in the current reveal hasn't reached history yet.
@@ -269,24 +358,33 @@ function Game({ anime, dealer, opening, endless, roundCount, best, onFinish, onR
     return (
       <Summary
         anime={anime}
+        seasons={seasons}
+        multiSeason={multiSeason}
         history={history}
         score={score}
         endless={endless}
         best={bestBefore.current}
         onReplay={onReplay}
+        onSetup={onSetup}
         onExit={onExit}
       />
     )
   }
 
   // Past ~40 episodes the grid stops fitting alongside a full-size frame.
-  const dense = anime.episodeCount > 40
+  const dense = inPlay.length > 40
 
   return (
     <div className={`shell ${dense ? 'dense' : ''}`}>
       <header className="hud">
         <button className="btn ghost" onClick={onExit}>← library</button>
-        <div className="hud-title">{anime.title}</div>
+        <div className="hud-title">
+          {anime.title}
+          {multiSeason && seasons.length < anime.seasons.length
+            ? <span className="muted"> · seasons {seasons.join(', ')}</span>
+            : null}
+          {seasons.length === 1 ? <span className="muted"> · season {seasons[0]}</span> : null}
+        </div>
         <div className="hud-stats">
           <span>
             Round <b>{roundIndex + 1}</b>
@@ -308,21 +406,24 @@ function Game({ anime, dealer, opening, endless, roundCount, best, onFinish, onR
         {!result && !hint ? (
           <button
             className="btn ghost"
-            onClick={() => setHint(hintWindow(current.episode.abs, anime.episodeCount))}
+            onClick={() => setHint(hintWindow(current.episode.abs, inPlay))}
           >
             Narrow it down <span className="muted small">— half points</span>
           </button>
         ) : null}
         {hint && !result ? (
           <span className="hint-note">
-            Somewhere in episodes {hint.start}–{hint.end}. Half points.
+            Somewhere between {epLabel(hint.first, multiSeason)} and{' '}
+            {epLabel(hint.last, multiSeason)}. Half points.
           </span>
         ) : null}
-        {result ? <Verdict result={result} anime={anime} /> : null}
+        {result ? <Verdict result={result} anime={anime} multiSeason={multiSeason} /> : null}
       </div>
 
       <EpisodeGrid
         anime={anime}
+        inPlay={inPlay}
+        multiSeason={multiSeason}
         selected={selected}
         onSelect={setSelected}
         result={result}
@@ -373,10 +474,9 @@ function Frame({ src }) {
   )
 }
 
-function Verdict({ result, anime }) {
+function Verdict({ result, anime, multiSeason }) {
   const v = verdictFor(result.distance)
   const answer = episodeByAbs(anime, result.answerAbs)
-  const multiSeason = anime.seasons.length > 1
   return (
     <div className={`verdict verdict-${v.tone}`}>
       <span className="verdict-label">{v.label}</span>
@@ -392,11 +492,11 @@ function Verdict({ result, anime }) {
   )
 }
 
-function EpisodeGrid({ anime, selected, onSelect, result, hint }) {
-  const multiSeason = anime.seasons.length > 1
+function EpisodeGrid({ anime, inPlay, multiSeason, selected, onSelect, result, hint }) {
+  const seasonsInPlay = [...new Set(inPlay.map((e) => e.season))]
   const groups = multiSeason
-    ? anime.seasons.map((s) => ({ season: s, episodes: anime.episodes.filter((e) => e.season === s) }))
-    : [{ season: null, episodes: anime.episodes }]
+    ? seasonsInPlay.map((s) => ({ season: s, episodes: inPlay.filter((e) => e.season === s) }))
+    : [{ season: null, episodes: inPlay }]
 
   return (
     <div className="grid-wrap">
@@ -405,7 +505,7 @@ function EpisodeGrid({ anime, selected, onSelect, result, hint }) {
           {g.season != null ? <h2 className="season-label">Season {g.season}</h2> : null}
           <div className="grid">
             {g.episodes.map((e) => {
-              const outside = hint && (e.abs < hint.start || e.abs > hint.end)
+              const outside = hint && !hint.allowed.has(e.abs)
               const classes = ['tile']
               if (selected === e.abs) classes.push('tile-selected')
               if (outside) classes.push('tile-dimmed')
@@ -436,14 +536,13 @@ function EpisodeGrid({ anime, selected, onSelect, result, hint }) {
 
 /* ----------------------------------------------------------------- summary */
 
-function Summary({ anime, history, score, endless, best, onReplay, onExit }) {
+function Summary({ anime, seasons, multiSeason, history, score, endless, best, onReplay, onSetup, onExit }) {
   const exact = history.filter((h) => h.distance === 0).length
   const close = history.filter((h) => h.distance > 0 && h.distance <= MAX_PARTIAL_DISTANCE).length
   const avg = history.length
     ? (history.reduce((n, h) => n + h.distance, 0) / history.length).toFixed(1)
     : '0'
   const isRecord = score > best
-  const multiSeason = anime.seasons.length > 1
 
   return (
     <div className="shell">
@@ -459,7 +558,8 @@ function Summary({ anime, history, score, endless, best, onReplay, onExit }) {
 
       <div className="submit-bar">
         <button className="btn primary" onClick={onReplay}>Play again</button>
-        <button className="btn ghost" onClick={onExit}>Pick another anime</button>
+        <button className="btn ghost" onClick={onSetup}>Change setup</button>
+        <button className="btn ghost" onClick={onExit}>Library</button>
       </div>
 
       <div className="recap">

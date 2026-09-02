@@ -30,10 +30,18 @@ Point it at a folder of per-episode zips (or per-episode subfolders) of images:
 npm run import -- --input "D:/epguesser - rezero" --title "Re:Zero" --id rezero --dry-run
 ```
 
-It reads the episode number from each zip/folder name (`ep 7.zip`, `7`, `Episode 07`) and the
-timestamp from each image name (`artplayer_12_34.png` → 12:34), so the reveal can still tell you
-where in the episode the frame came from. The dry run prints the episode mapping and warns if two
-sources claim the same episode number.
+It reads season and episode from each zip/folder name — `2x11.zip`, `S02E11`, `ep 7.zip`, `7` —
+and the timestamp from each image name (`artplayer_12_34.png` → 12:34). A folder that contains
+zips is treated as a season container, so a layout like this works in one pass:
+
+```
+D:/epguesser - rezero/
+  szn 1/   1.zip, ep 2.zip, ...      season from the folder name
+  szn 2/   2x1.zip, 2x2.zip, ...     season from the file name
+```
+
+Names that carry their own season win; otherwise the folder name supplies it, falling back to
+`--season`. The dry run prints the full `S01E01` mapping and warns if two sources collide.
 
 Screenshots at the same second are treated as the same moment and deduped. `--max` thins what's
 left down to an even spread across the episode, which is how you keep the pack hostable:
@@ -131,6 +139,19 @@ Consecutive exact guesses add +100 each, up to +500. The "narrow it down" hint d
 quarter of the episode list and halves the round's base points. Distance is measured in absolute
 episode index across the whole series, so guessing S02E01 when the answer is S01E12 is 1 off.
 
+### Picking a game
+
+Opening an anime shows a setup screen: how many rounds, and which seasons to play. Seasons are a
+multi-select, so you can play just season 3, or seasons 2 and 4 together, or the lot. Only the
+chosen seasons are dealt and only they appear in the guess grid.
+
+Distance is still measured in absolute episode index across the whole series, so a cross-season
+guess between non-adjacent selections scores zero rather than accidental partial credit. When one
+season is in play the labels drop the redundant season half and read "Episode 12".
+
+Past 40 episodes in play the layout switches to a denser grid and a smaller frame, so the whole
+grid still fits on screen instead of pushing later seasons below the fold.
+
 ### Endless
 
 The **∞** round option runs until you miss. Anything within 3 episodes keeps you alive; a guess
@@ -138,8 +159,9 @@ The **∞** round option runs until you miss. Anything within 3 episodes keeps y
 long as you survive, and the same no-repeat-until-exhausted rule still applies — you won't see
 the same episode twice until every episode has come up.
 
-Best score per (anime, round count) is kept in `localStorage`, with endless tracked separately
-from the fixed-length games.
+Best score per (anime, season selection, round count) is kept in `localStorage` — a season-3-only
+run doesn't compete with an all-seasons run, and endless is tracked separately from the
+fixed-length games.
 
 ## Layout
 

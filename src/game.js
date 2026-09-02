@@ -48,10 +48,15 @@ export function verdictFor(distance) {
 export const epLabel = (e, multiSeason = true) =>
   (multiSeason ? `Season ${e.season}, Episode ${e.ep}` : `Episode ${e.ep}`)
 
-/** Every (episode, frame) pair in a manifest, flattened into a draw pool. */
-export function buildFramePool(anime) {
+/**
+ * Every (episode, frame) pair in a manifest, flattened into a draw pool.
+ * `seasons` limits it to a subset; null/undefined means the whole series.
+ */
+export function buildFramePool(anime, seasons = null) {
+  const allowed = seasons ? new Set(seasons) : null
   const pool = []
   for (const episode of anime.episodes) {
+    if (allowed && !allowed.has(episode.season)) continue
     episode.frames.forEach((src, i) => {
       pool.push({ src, episode, time: episode.times?.[i] ?? null })
     })
@@ -59,14 +64,20 @@ export function buildFramePool(anime) {
   return pool
 }
 
+/** Episodes in play for a season selection, in running order. */
+export function playableEpisodes(anime, seasons = null) {
+  const allowed = seasons ? new Set(seasons) : null
+  return anime.episodes.filter((e) => !allowed || allowed.has(e.season))
+}
+
 /**
  * Deals frames one at a time, avoiding repeats of the same episode until every
  * episode has been used once. Lazy rather than pre-drawn so endless runs can go
  * as long as the player survives.
  */
-export function createDealer(anime, rng = Math.random) {
+export function createDealer(anime, seasons = null, rng = Math.random) {
   const byEpisode = new Map()
-  for (const item of buildFramePool(anime)) {
+  for (const item of buildFramePool(anime, seasons)) {
     const key = item.episode.abs
     if (!byEpisode.has(key)) byEpisode.set(key, [])
     byEpisode.get(key).push(item)
@@ -94,22 +105,36 @@ export function shuffle(arr, rng = Math.random) {
 }
 
 /**
- * The hint: a contiguous run of episodes guaranteed to contain the answer,
- * roughly a quarter of the series, positioned so the answer isn't always centred.
+ * The hint: a contiguous run of the episodes actually in play, guaranteed to
+ * contain the answer, roughly a quarter of them, positioned so the answer isn't
+ * always dead centre.
  */
-export function hintWindow(answerAbs, episodeCount, rng = Math.random) {
-  const size = Math.max(4, Math.min(episodeCount, Math.ceil(episodeCount * 0.25)))
+export function hintWindow(answerAbs, inPlay, rng = Math.random) {
+  const idx = inPlay.findIndex((e) => e.abs === answerAbs)
+  if (idx < 0) return null
+  const size = Math.max(4, Math.min(inPlay.length, Math.ceil(inPlay.length * 0.25)))
   const offset = Math.floor(rng() * size)
-  let start = answerAbs - offset
-  start = Math.max(1, Math.min(start, episodeCount - size + 1))
-  return { start, end: start + size - 1, size }
+  const start = Math.max(0, Math.min(idx - offset, inPlay.length - size))
+  const slice = inPlay.slice(start, start + size)
+  return {
+    allowed: new Set(slice.map((e) => e.abs)),
+    first: slice[0],
+    last: slice[slice.length - 1],
+    size: slice.length,
+  }
 }
 
 /* ------------------------------------------------------------ persistence */
 
 const BEST_KEY = 'epguessr.best.v3'
 
-export const bestKey = (animeId, rounds) => `${animeId}:${rounds}`
+/** Stable label for a season selection, so bests don't mix across configs. */
+export function seasonsKey(seasons, allSeasons) {
+  if (!seasons || seasons.length === allSeasons.length) return 'all'
+  return [...seasons].sort((a, b) => a - b).join('+')
+}
+
+export const bestKey = (animeId, seasonsLabel, rounds) => `${animeId}:${seasonsLabel}:${rounds}`
 
 export function loadBests() {
   try {
@@ -119,9 +144,9 @@ export function loadBests() {
   }
 }
 
-export function saveBest(animeId, rounds, score) {
+export function saveBest(animeId, seasonsLabel, rounds, score) {
   const bests = loadBests()
-  const key = bestKey(animeId, rounds)
+  const key = bestKey(animeId, seasonsLabel, rounds)
   if (!(key in bests) || score > bests[key]) {
     bests[key] = score
     try {
