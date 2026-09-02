@@ -266,6 +266,16 @@ code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; }
 
 .grid-wrap { margin-top: 14px; display: grid; gap: 18px; }
 
+/* Long-running shows: shrink the frame and the tiles so the whole grid still
+   fits on screen instead of pushing later seasons below the fold. */
+.dense { padding-bottom: 14px; }
+.dense .grid-wrap { gap: 10px; margin-top: 10px; }
+.dense .season-label { margin-bottom: 5px; }
+.dense .grid { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px; }
+.dense .frame { max-width: min(100%, calc(34vh * 16 / 9)); }
+.dense .controls { min-height: 38px; margin: 8px 0 2px; }
+.dense .submit-bar { padding: 12px 0 10px; margin-top: 10px; }
+
 .season-label {
   margin: 0 0 8px;
   font-size: 12px;

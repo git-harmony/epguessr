@@ -279,8 +279,11 @@ function Game({ anime, dealer, opening, endless, roundCount, best, onFinish, onR
     )
   }
 
+  // Past ~40 episodes the grid stops fitting alongside a full-size frame.
+  const dense = anime.episodeCount > 40
+
   return (
-    <div className="shell">
+    <div className={`shell ${dense ? 'dense' : ''}`}>
       <header className="hud">
         <button className="btn ghost" onClick={onExit}>← library</button>
         <div className="hud-title">{anime.title}</div>

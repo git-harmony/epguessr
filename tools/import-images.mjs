@@ -45,7 +45,7 @@ if (!args.input || args.help) {
     '  --input <dir>    folder of per-episode zips or subfolders            [required]',
     '  --title <name>   display title (defaults to the input folder name)',
     '  --id <slug>      url-safe id (defaults to a slug of the title)',
-    '  --season <n>     season number for everything imported                     [1]',
+    '  --season <n>     season for names that do not carry one (2x11 already does)  [1]',
     '  --max <n>        cap frames per episode, spread evenly by timestamp  [all]',
     '  --skip-intro <s> drop frames before this timestamp                          [0]',
     '  --skip-outro <s> drop frames within this many seconds of the episode end   [90]',
@@ -78,14 +78,39 @@ const ID = String(args.id ?? slugify(TITLE))
 
 /* ---------------------------------------------------------------- parsing */
 
-/** "ep 7.zip" / "Episode 07" / "7" -> 7 */
-function parseEpisodeNumber(name) {
+/**
+ * "2x11.zip" -> season 2 episode 11, "ep 7.zip" -> episode 7 (season from --season).
+ * Season-bearing patterns come first so "2x1" isn't read as episode 2.
+ */
+function parseSourceEpisode(name) {
   const base = name.replace(/\.zip$/i, '').trim()
-  const m =
+
+  const withSeason =
+    base.match(/\bS(\d{1,2})[\s._-]*E(\d{1,3})\b/i) ??
+    base.match(/\b(\d{1,2})[xX](\d{1,3})\b/)
+  if (withSeason) return { season: Number(withSeason[1]), ep: Number(withSeason[2]) }
+
+  const epOnly =
     base.match(/\bep(?:isode)?[\s._-]*(\d{1,3})\b/i) ??
     base.match(/\bE(\d{1,3})\b/) ??
     base.match(/(\d{1,3})/)
+  return epOnly ? { season: null, ep: Number(epOnly[1]) } : null
+}
+
+/** "szn 2" / "Season 02" / "S2" -> 2, for folders whose zips omit the season. */
+function parseFolderSeason(name) {
+  const m = name.match(/(?:szn|season|series|s)[\s._-]*(\d{1,2})/i)
   return m ? Number(m[1]) : null
+}
+
+/** A folder holding zips is a season container, not an episode. */
+async function holdsZips(dir) {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true })
+    return entries.some((e) => e.isFile() && e.name.toLowerCase().endsWith('.zip'))
+  } catch {
+    return false
+  }
 }
 
 /** "artplayer_12_34.png" -> 754 seconds. Also accepts 1_02_03 as h_m_s. */
@@ -159,29 +184,48 @@ function thin(list, max) {
 /* ------------------------------------------------------------------- main */
 
 async function main() {
-  const entries = await fs.readdir(CFG.input, { withFileTypes: true })
-
   const sources = []
-  for (const e of entries) {
-    const isZip = e.isFile() && e.name.toLowerCase().endsWith('.zip')
-    if (!isZip && !e.isDirectory()) continue
-    const ep = parseEpisodeNumber(e.name)
-    if (ep === null) continue
-    sources.push({ ep, name: e.name, isZip, full: path.join(CFG.input, e.name) })
+
+  // A folder of zips is a season container: descend into it and let its name
+  // supply the season for any zip whose own name omits one ("szn 1/ep 4.zip").
+  async function collect(dir, inherited) {
+    let children
+    try { children = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
+    for (const e of children) {
+      const full = path.join(dir, e.name)
+      const isZip = e.isFile() && e.name.toLowerCase().endsWith('.zip')
+      if (e.isDirectory() && (await holdsZips(full))) {
+        await collect(full, parseFolderSeason(e.name) ?? inherited)
+        continue
+      }
+      if (!isZip && !e.isDirectory()) continue
+      const parsed = parseSourceEpisode(e.name)
+      if (!parsed) continue
+      sources.push({
+        season: parsed.season ?? inherited ?? CFG.season,
+        ep: parsed.ep,
+        name: e.name,
+        isZip,
+        full,
+      })
+    }
   }
-  sources.sort((a, b) => a.ep - b.ep)
+
+  await collect(CFG.input, parseFolderSeason(path.basename(CFG.input)))
+  sources.sort((a, b) => a.season - b.season || a.ep - b.ep)
 
   if (!sources.length) {
     console.error(`\n  No per-episode zips or folders found in ${CFG.input}\n`)
     process.exit(1)
   }
 
-  const dupes = sources.filter((s, i) => sources.findIndex((o) => o.ep === s.ep) !== i)
-  console.log(`\n${TITLE}  (id: ${ID}, season ${CFG.season})`)
+  const key = (x) => `${x.season}:${x.ep}`
+  const dupes = sources.filter((s, i) => sources.findIndex((o) => key(o) === key(s)) !== i)
+  console.log(`\n${TITLE}  (id: ${ID})`)
   console.log(`${sources.length} episodes found\n`)
-  for (const s of sources) console.log(`  episode ${String(s.ep).padStart(2)}  ${s.name}`)
+  for (const s of sources) console.log(`  ${epTagOf(s)}  ${s.name}`)
   if (dupes.length) {
-    console.log(`\n  WARNING: more than one source maps to episode ${[...new Set(dupes.map((d) => d.ep))].join(', ')}`)
+    console.log(`\n  WARNING: more than one source maps to ${[...new Set(dupes.map(epTagOf))].join(', ')}`)
   }
 
   if (CFG.dryRun) {
@@ -195,7 +239,7 @@ async function main() {
 
   const done = []
   for (const src of sources) {
-    const tag = epTag(CFG.season, src.ep)
+    const tag = epTag(src.season, src.ep)
     const outDir = path.join(ROOT, 'public', 'frames', ID, tag)
 
     if (!CFG.force) {
@@ -204,7 +248,7 @@ async function main() {
         if (have.length) {
           console.log(`  ${tag}  skip (${have.length} frames already)`)
           done.push({
-            season: CFG.season,
+            season: src.season,
             ep: src.ep,
             frames: have.sort(byNum).map((f) => `frames/${ID}/${tag}/${f}`),
             times: [],
@@ -216,7 +260,7 @@ async function main() {
 
     let imageDir = src.full
     if (src.isZip) {
-      imageDir = path.join(workRoot, String(src.ep))
+      imageDir = path.join(workRoot, epTag(src.season, src.ep))
       if (!(await unzip(src.full, imageDir))) {
         console.log(`  ${tag}  FAILED to unzip ${src.name}`)
         continue
@@ -270,7 +314,7 @@ async function main() {
     )
     if (ok.length) {
       done.push({
-        season: CFG.season,
+        season: src.season,
         ep: src.ep,
         frames: ok.map((s) => s.rel),
         times: ok.map((s) => s.time),
@@ -293,5 +337,6 @@ async function main() {
 }
 
 const byNum = (a, b) => parseInt(a, 10) - parseInt(b, 10)
+const epTagOf = (x) => epTag(x.season, x.ep).toUpperCase()
 
 main().catch((e) => { console.error(e); process.exit(1) })
