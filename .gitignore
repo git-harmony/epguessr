@@ -1,0 +1,6 @@
+node_modules
+dist
+public/frames/*
+!public/frames/.gitkeep
+public/data/*
+!public/data/.gitkeep
