@@ -199,6 +199,9 @@ code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; }
 
 .streak { color: var(--close); }
 
+.lives { color: var(--miss); letter-spacing: 1px; }
+.lives-out { opacity: 0.45; }
+
 /* ------------------------------------------------------------------- frame */
 
 .frame {

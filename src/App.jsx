@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ENDLESS,
+  ENDLESS_LIVES,
   ROUND_OPTIONS,
   MAX_PARTIAL_DISTANCE,
   bestKey,
-  drawRounds,
+  createDealer,
   epLabel,
+  isEndless,
+  isMiss,
   hintWindow,
   loadBests,
   saveBest,
@@ -36,11 +40,19 @@ export default function App() {
       const res = await fetch(asset(`data/${entry.id}.json`))
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const anime = await res.json()
+      const dealer = createDealer(anime)
+      const endless = isEndless(rounds)
+      // Endless deals as it goes; fixed games get the whole deck up front.
+      const opening = (endless ? [dealer.next()] : Array.from({ length: rounds }, () => dealer.next()))
+        .filter(Boolean)
       seq.current += 1
       setSession({
         anime,
-        rounds: drawRounds(anime, rounds),
-        roundCount: rounds,
+        dealer,
+        opening,
+        endless,
+        roundCount: endless ? null : rounds,
+        rounds,
         seq: seq.current,
       })
     } catch (e) {
@@ -71,9 +83,12 @@ export default function App() {
       <Game
         key={session.seq}
         anime={session.anime}
-        rounds={session.rounds}
-        best={bests[bestKey(session.anime.id, session.roundCount)] ?? 0}
-        onFinish={(score) => finish(session.anime, session.roundCount, score)}
+        dealer={session.dealer}
+        opening={session.opening}
+        endless={session.endless}
+        roundCount={session.roundCount}
+        best={bests[bestKey(session.anime.id, session.rounds)] ?? 0}
+        onFinish={(score) => finish(session.anime, session.rounds, score)}
         onReplay={() => startGame({ id: session.anime.id, title: session.anime.title })}
         onExit={() => setSession(null)}
       />
@@ -137,8 +152,9 @@ function Menu({ animes, rounds, setRounds, bests, onPick }) {
             key={n}
             className={`chip ${rounds === n ? 'chip-on' : ''}`}
             onClick={() => setRounds(n)}
+            title={n === ENDLESS ? `Endless — ${ENDLESS_LIVES} lives` : `${n} rounds`}
           >
-            {n}
+            {n === ENDLESS ? '∞' : n}
           </button>
         ))}
       </div>
@@ -169,7 +185,8 @@ function Menu({ animes, rounds, setRounds, bests, onPick }) {
 
 /* -------------------------------------------------------------------- game */
 
-function Game({ anime, rounds, best, onFinish, onReplay, onExit }) {
+function Game({ anime, dealer, opening, endless, roundCount, best, onFinish, onReplay, onExit }) {
+  const [deck, setDeck] = useState(opening)
   const [roundIndex, setRoundIndex] = useState(0)
   const [selected, setSelected] = useState(null)
   const [result, setResult] = useState(null)
@@ -179,9 +196,13 @@ function Game({ anime, rounds, best, onFinish, onReplay, onExit }) {
   // Snapshot the record before this game counts, so the summary can say "new best".
   const bestBefore = useRef(best)
 
-  const current = rounds[roundIndex]
+  const current = deck[roundIndex]
   const multiSeason = anime.seasons.length > 1
   const score = history.reduce((n, h) => n + h.points, 0)
+  const livesLeft = ENDLESS_LIVES - history.filter((h) => isMiss(h.distance)).length
+  // A miss showing in the current reveal hasn't reached history yet.
+  const livesAfter = livesLeft - (result && isMiss(result.distance) ? 1 : 0)
+  const lastRound = endless ? livesAfter <= 0 : roundIndex + 1 >= roundCount
   const streak = useMemo(() => {
     let s = 0
     for (let i = history.length - 1; i >= 0; i--) {
@@ -210,17 +231,28 @@ function Game({ anime, rounds, best, onFinish, onReplay, onExit }) {
       usedHint: result.usedHint,
     }
     const nextHistory = [...history, entry]
+    const total = nextHistory.reduce((n, h) => n + h.points, 0)
     setHistory(nextHistory)
     setResult(null)
     setSelected(null)
     setHint(null)
-    if (roundIndex + 1 >= rounds.length) {
+
+    if (lastRound) {
       setDone(true)
-      onFinish(nextHistory.reduce((n, h) => n + h.points, 0))
-    } else {
-      setRoundIndex(roundIndex + 1)
+      onFinish(total)
+      return
     }
-  }, [result, current, history, roundIndex, rounds.length, onFinish])
+    if (endless && roundIndex + 1 >= deck.length) {
+      const card = dealer.next()
+      if (!card) {
+        setDone(true)
+        onFinish(total)
+        return
+      }
+      setDeck([...deck, card])
+    }
+    setRoundIndex(roundIndex + 1)
+  }, [result, current, history, roundIndex, deck, dealer, endless, lastRound, onFinish])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -239,6 +271,7 @@ function Game({ anime, rounds, best, onFinish, onReplay, onExit }) {
         anime={anime}
         history={history}
         score={score}
+        endless={endless}
         best={bestBefore.current}
         onReplay={onReplay}
         onExit={onExit}
@@ -252,8 +285,16 @@ function Game({ anime, rounds, best, onFinish, onReplay, onExit }) {
         <button className="btn ghost" onClick={onExit}>← library</button>
         <div className="hud-title">{anime.title}</div>
         <div className="hud-stats">
-          <span>Round <b>{roundIndex + 1}</b>/{rounds.length}</span>
+          <span>
+            Round <b>{roundIndex + 1}</b>
+            {endless ? null : `/${roundCount}`}
+          </span>
           <span>Score <b>{score.toLocaleString()}</b></span>
+          {endless ? (
+            <span className={livesAfter > 0 ? 'lives' : 'lives lives-out'}>
+              {'♥'.repeat(Math.max(livesAfter, 0)) || '♡'}
+            </span>
+          ) : null}
           {streak > 1 ? <span className="streak">🔥 {streak}</span> : null}
         </div>
       </header>
@@ -288,7 +329,7 @@ function Game({ anime, rounds, best, onFinish, onReplay, onExit }) {
       <div className="submit-bar">
         {result ? (
           <button className="btn primary" onClick={next} autoFocus>
-            {roundIndex + 1 >= rounds.length ? 'See results' : 'Next round'} <kbd>↵</kbd>
+            {lastRound ? 'See results' : 'Next round'} <kbd>↵</kbd>
           </button>
         ) : (
           <button className="btn primary" onClick={submit} disabled={selected == null}>
@@ -392,7 +433,7 @@ function EpisodeGrid({ anime, selected, onSelect, result, hint }) {
 
 /* ----------------------------------------------------------------- summary */
 
-function Summary({ anime, history, score, best, onReplay, onExit }) {
+function Summary({ anime, history, score, endless, best, onReplay, onExit }) {
   const exact = history.filter((h) => h.distance === 0).length
   const close = history.filter((h) => h.distance > 0 && h.distance <= MAX_PARTIAL_DISTANCE).length
   const avg = history.length
@@ -406,7 +447,9 @@ function Summary({ anime, history, score, best, onReplay, onExit }) {
       <header className="masthead">
         <h1 className="wordmark">{score.toLocaleString()}</h1>
         <p className="lede">
-          {anime.title} · {exact} exact, {close} close · {avg} episodes off on average
+          {anime.title}
+          {endless ? ` · survived ${history.length} round${history.length === 1 ? '' : 's'}` : ''}
+          {` · ${exact} exact, ${close} close · ${avg} episodes off on average`}
         </p>
         {isRecord ? <p className="record">New personal best</p> : <p className="muted small">Best {best.toLocaleString()}</p>}
       </header>

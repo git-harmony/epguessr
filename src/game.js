@@ -1,6 +1,15 @@
 /* Pure game rules — no React, no DOM, so they're easy to reason about and test. */
 
-export const ROUND_OPTIONS = [5, 10, 20]
+export const ENDLESS = 'endless'
+export const ROUND_OPTIONS = [5, 10, 20, ENDLESS]
+
+/** Misses allowed in endless before the run ends. */
+export const ENDLESS_LIVES = 1
+
+export const isEndless = (rounds) => rounds === ENDLESS
+
+/** A guess this far off (or worse) costs a life in endless. */
+export const isMiss = (distance) => distance > MAX_PARTIAL_DISTANCE
 
 // Points by how many episodes off the guess was. Index === distance.
 const DISTANCE_POINTS = [1000, 500, 250, 100]
@@ -51,29 +60,28 @@ export function buildFramePool(anime) {
 }
 
 /**
- * Draw `count` frames, avoiding repeats of the same episode until every episode
- * has been used once. Keeps a 10-round game from showing episode 3 four times.
+ * Deals frames one at a time, avoiding repeats of the same episode until every
+ * episode has been used once. Lazy rather than pre-drawn so endless runs can go
+ * as long as the player survives.
  */
-export function drawRounds(anime, count, rng = Math.random) {
-  const pool = buildFramePool(anime)
-  if (!pool.length) return []
-
+export function createDealer(anime, rng = Math.random) {
   const byEpisode = new Map()
-  for (const item of pool) {
+  for (const item of buildFramePool(anime)) {
     const key = item.episode.abs
     if (!byEpisode.has(key)) byEpisode.set(key, [])
     byEpisode.get(key).push(item)
   }
 
-  const rounds = []
   let bag = []
-  while (rounds.length < count) {
-    if (!bag.length) bag = shuffle([...byEpisode.keys()], rng)
-    const abs = bag.pop()
-    const frames = byEpisode.get(abs)
-    rounds.push(frames[Math.floor(rng() * frames.length)])
+  return {
+    empty: byEpisode.size === 0,
+    next() {
+      if (!byEpisode.size) return null
+      if (!bag.length) bag = shuffle([...byEpisode.keys()], rng)
+      const frames = byEpisode.get(bag.pop())
+      return frames[Math.floor(rng() * frames.length)]
+    },
   }
-  return rounds
 }
 
 export function shuffle(arr, rng = Math.random) {

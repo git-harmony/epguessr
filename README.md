@@ -131,7 +131,15 @@ Consecutive exact guesses add +100 each, up to +500. The "narrow it down" hint d
 quarter of the episode list and halves the round's base points. Distance is measured in absolute
 episode index across the whole series, so guessing S02E01 when the answer is S01E12 is 1 off.
 
-Best score per (anime, round count) is kept in `localStorage`.
+### Endless
+
+The **∞** round option runs until you miss. Anything within 3 episodes keeps you alive; a guess
+4 or more off ends the run. Rounds are dealt lazily rather than pre-drawn, so a run can go as
+long as you survive, and the same no-repeat-until-exhausted rule still applies — you won't see
+the same episode twice until every episode has come up.
+
+Best score per (anime, round count) is kept in `localStorage`, with endless tracked separately
+from the fixed-length games.
 
 ## Layout
 
