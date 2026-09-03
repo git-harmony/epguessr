@@ -90,7 +90,12 @@ code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; }
 
 /* -------------------------------------------------------------- statistics */
 
-.masthead-actions { margin-top: 14px; }
+.topbar {
+  display: flex;
+  justify-content: flex-end;
+  /* Pulls level with the shell's top padding so it reads as a page corner. */
+  margin-bottom: -14px;
+}
 
 .tiles-row {
   display: grid;

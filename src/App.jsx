@@ -183,12 +183,13 @@ function NoData({ error }) {
 function Menu({ animes, onPick, onStats }) {
   return (
     <div className="shell">
+      <div className="topbar">
+        <button className="btn ghost" onClick={onStats}>Statistics</button>
+      </div>
+
       <header className="masthead">
         <h1 className="wordmark">epguessr</h1>
         <p className="lede">One random frame. Name the episode it came from.</p>
-        <div className="masthead-actions">
-          <button className="btn ghost" onClick={onStats}>Statistics</button>
-        </div>
       </header>
 
       <div className="library">

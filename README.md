@@ -165,7 +165,7 @@ fixed-length games.
 
 ## Statistics
 
-The **Statistics** button on the library screen tracks per-episode accuracy across every game
+The **Statistics** button in the top right of the library screen tracks per-episode accuracy across every game
 you've ever played — all animes, all seasons, all round lengths pooled together.
 
 Rounds are recorded as they're answered rather than at the end of a game, so quitting halfway
