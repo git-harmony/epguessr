@@ -163,11 +163,32 @@ Best score per (anime, season selection, round count) is kept in `localStorage` 
 run doesn't compete with an all-seasons run, and endless is tracked separately from the
 fixed-length games.
 
+## Statistics
+
+The **Statistics** button on the library screen tracks per-episode accuracy across every game
+you've ever played — all animes, all seasons, all round lengths pooled together.
+
+Rounds are recorded as they're answered rather than at the end of a game, so quitting halfway
+still counts what you actually guessed. Each episode keeps attempts, total distance, exact count
+and the last frame shown as a thumbnail.
+
+Two rankings, by average distance: **worst known** (highest average miss) and **best known**
+(lowest). Both come from one sorted list split at each end, so an episode can never appear in
+both — taking the top N of two opposite sorts would repeat the middle rows whenever few episodes
+qualify.
+
+The minimum-guesses threshold filters out episodes seen too few times to mean anything; a single
+unlucky guess shouldn't crown an episode your worst. Default is 2+.
+
+Stored in `localStorage` under `epguessr.stats.v1`, separate from high scores, and resettable
+from the page without touching them.
+
 ## Layout
 
 ```
 src/game.js               scoring, frame draw, hint window — pure functions
-src/App.jsx               menu, round loop, reveal, summary
+src/stats.js              per-episode accuracy tracking and rankings
+src/App.jsx               menu, setup, round loop, reveal, summary, statistics
 tools/import-images.mjs   screenshot importer (zips/folders of stills)
 tools/extract.mjs         ffmpeg frame extractor (video files)
 tools/lib/manifest.mjs    manifest merge/write shared by the tools

@@ -17,6 +17,7 @@ import {
   scoreRound,
   verdictFor,
 } from './game.js'
+import { clearStats, loadStats, recordRound, splitRankings, statRows, statTotals } from './stats.js'
 
 const asset = (rel) => `${import.meta.env.BASE_URL}${rel}`.replace(/([^:])\/\//g, '$1/')
 
@@ -67,6 +68,19 @@ export default function App() {
     })
   }, [])
 
+  // Recorded per round, so quitting mid-game still counts what was guessed.
+  const onRound = useCallback((anime, entry) => {
+    const answer = anime.episodes.find((e) => e.abs === entry.answerAbs)
+    if (!answer) return
+    recordRound({
+      animeId: anime.id,
+      season: answer.season,
+      ep: answer.ep,
+      distance: entry.distance,
+      src: entry.frame?.src,
+    })
+  }, [])
+
   const finish = useCallback((anime, seasons, rounds, score) => {
     saveBest(anime.id, seasonsKey(seasons, anime.seasons), rounds, score)
     setBests(loadBests())
@@ -82,6 +96,15 @@ export default function App() {
         Couldn&apos;t load {session.entry.title}.
         <button className="btn" onClick={() => setSession(null)}>Back</button>
       </Splash>
+    )
+  }
+
+  if (session?.phase === 'stats') {
+    return (
+      <Stats
+        titles={Object.fromEntries(index.map((a) => [a.id, a.title]))}
+        onExit={() => setSession(null)}
+      />
     )
   }
 
@@ -109,6 +132,7 @@ export default function App() {
         seasons={session.seasons}
         best={bests[bestKey(session.anime.id, label, session.rounds)] ?? 0}
         onFinish={(score) => finish(session.anime, session.seasons, session.rounds, score)}
+        onRound={(entry) => onRound(session.anime, entry)}
         onReplay={() => start(session.anime, session.rounds, session.seasons)}
         onSetup={() => setSession({ phase: 'setup', anime: session.anime })}
         onExit={() => setSession(null)}
@@ -116,7 +140,13 @@ export default function App() {
     )
   }
 
-  return <Menu animes={index} onPick={openAnime} />
+  return (
+    <Menu
+      animes={index}
+      onPick={openAnime}
+      onStats={() => setSession({ phase: 'stats' })}
+    />
+  )
 }
 
 /* -------------------------------------------------------------- shell bits */
@@ -150,12 +180,15 @@ function NoData({ error }) {
 
 /* -------------------------------------------------------------------- menu */
 
-function Menu({ animes, onPick }) {
+function Menu({ animes, onPick, onStats }) {
   return (
     <div className="shell">
       <header className="masthead">
         <h1 className="wordmark">epguessr</h1>
         <p className="lede">One random frame. Name the episode it came from.</p>
+        <div className="masthead-actions">
+          <button className="btn ghost" onClick={onStats}>Statistics</button>
+        </div>
       </header>
 
       <div className="library">
@@ -176,6 +209,131 @@ function Menu({ animes, onPick }) {
         ))}
       </div>
     </div>
+  )
+}
+
+/* ------------------------------------------------------------- statistics */
+
+const MIN_ATTEMPT_OPTIONS = [1, 2, 3, 5]
+
+function Stats({ titles, onExit }) {
+  const [stats, setStats] = useState(() => loadStats())
+  const [minAttempts, setMinAttempts] = useState(2)
+
+  const rows = useMemo(() => statRows(stats, titles), [stats, titles])
+  const totals = useMemo(() => statTotals(rows), [rows])
+  const { worst, best: bestKnown, eligible } = useMemo(
+    () => splitRankings(rows, minAttempts),
+    [rows, minAttempts],
+  )
+
+  const reset = () => {
+    if (window.confirm('Clear all recorded statistics? This cannot be undone.')) {
+      setStats(clearStats())
+    }
+  }
+
+  if (!rows.length) {
+    return (
+      <div className="shell">
+        <header className="masthead">
+          <h1 className="wordmark">Statistics</h1>
+          <p className="lede">Nothing recorded yet — play a round and it&apos;ll show up here.</p>
+        </header>
+        <div className="submit-bar">
+          <button className="btn primary" onClick={onExit}>← library</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="shell">
+      <header className="masthead">
+        <h1 className="wordmark">Statistics</h1>
+        <p className="lede">
+          {totals.attempts} guess{totals.attempts === 1 ? '' : 'es'} across {totals.episodes} episode
+          {totals.episodes === 1 ? '' : 's'}
+        </p>
+      </header>
+
+      <div className="tiles-row">
+        <StatTile label="Exact" value={`${Math.round(totals.exactRate * 100)}%`} note={`${totals.exact} of ${totals.attempts}`} />
+        <StatTile label="Average miss" value={totals.avgDistance.toFixed(2)} note="episodes off" />
+        <StatTile label="Episodes seen" value={String(totals.episodes)} note="with at least one guess" />
+      </div>
+
+      <section className="setup-block">
+        <h2 className="setup-label">Minimum guesses to rank</h2>
+        <div className="chip-row">
+          {MIN_ATTEMPT_OPTIONS.map((n) => (
+            <button
+              key={n}
+              className={`chip ${minAttempts === n ? 'chip-on' : ''}`}
+              onClick={() => setMinAttempts(n)}
+            >
+              {n}+
+            </button>
+          ))}
+        </div>
+        <p className="muted small centre-text">
+          {eligible} episode{eligible === 1 ? '' : 's'} qualify
+        </p>
+      </section>
+
+      {eligible === 0 ? (
+        <p className="muted centre-text">
+          No episode has been guessed {minAttempts}+ times yet. Lower the threshold to see more.
+        </p>
+      ) : (
+        <div className="stat-columns">
+          {worst.length ? (
+            <StatList title="Worst known" subtitle="highest average miss" rows={worst} tone="miss" />
+          ) : null}
+          <StatList title="Best known" subtitle="lowest average miss" rows={bestKnown} tone="exact" />
+        </div>
+      )}
+
+      <div className="submit-bar">
+        <button className="btn primary" onClick={onExit}>← library</button>
+        <button className="btn ghost" onClick={reset}>Reset statistics</button>
+      </div>
+    </div>
+  )
+}
+
+function StatTile({ label, value, note }) {
+  return (
+    <div className="stat-tile">
+      <span className="stat-tile-label">{label}</span>
+      <span className="stat-tile-value">{value}</span>
+      <span className="muted small">{note}</span>
+    </div>
+  )
+}
+
+function StatList({ title, subtitle, rows, tone }) {
+  return (
+    <section className="stat-list">
+      <h2 className="setup-label">
+        {title} <span className="muted">· {subtitle}</span>
+      </h2>
+      {rows.map((r) => (
+        <div key={r.key} className={`stat-row stat-row-${tone}`}>
+          {r.src ? <img src={asset(r.src)} alt="" loading="lazy" /> : <div className="stat-row-blank" />}
+          <div className="stat-row-body">
+            <span className="stat-row-ep">
+              {epLabel({ season: r.season, ep: r.ep }, true)}
+            </span>
+            <span className="muted small">
+              {r.title} · {r.attempts} guess{r.attempts === 1 ? '' : 'es'} ·{' '}
+              {Math.round(r.exactRate * 100)}% exact
+            </span>
+          </div>
+          <span className="stat-row-avg">{r.avgDistance.toFixed(1)}</span>
+        </div>
+      ))}
+    </section>
   )
 }
 
@@ -271,7 +429,7 @@ function Setup({ anime, bests, onStart, onExit }) {
 
 function Game({
   anime, dealer, opening, endless, roundCount, seasons,
-  best, onFinish, onReplay, onSetup, onExit,
+  best, onFinish, onRound, onReplay, onSetup, onExit,
 }) {
   const [deck, setDeck] = useState(opening)
   const [roundIndex, setRoundIndex] = useState(0)
@@ -321,6 +479,7 @@ function Game({
     }
     const nextHistory = [...history, entry]
     const total = nextHistory.reduce((n, h) => n + h.points, 0)
+    onRound(entry)
     setHistory(nextHistory)
     setResult(null)
     setSelected(null)
@@ -341,7 +500,7 @@ function Game({
       setDeck([...deck, card])
     }
     setRoundIndex(roundIndex + 1)
-  }, [result, current, history, roundIndex, deck, dealer, endless, lastRound, onFinish])
+  }, [result, current, history, roundIndex, deck, dealer, endless, lastRound, onFinish, onRound])
 
   useEffect(() => {
     const onKey = (e) => {

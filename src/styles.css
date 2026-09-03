@@ -88,6 +88,86 @@ code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; }
 
 /* -------------------------------------------------------------------- menu */
 
+/* -------------------------------------------------------------- statistics */
+
+.masthead-actions { margin-top: 14px; }
+
+.tiles-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  max-width: 640px;
+  margin: 0 auto 26px;
+}
+
+.stat-tile {
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.stat-tile-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.stat-tile-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 24px;
+  margin-top: 8px;
+}
+
+.stat-list { display: grid; gap: 8px; align-content: start; }
+.stat-list .setup-label { text-align: left; }
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 10px;
+  padding: 7px 14px 7px 7px;
+}
+
+.stat-row-miss { border-left-color: var(--miss); }
+.stat-row-exact { border-left-color: var(--exact); }
+
+.stat-row img,
+.stat-row-blank {
+  width: 84px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #000;
+  flex: none;
+}
+
+.stat-row-body { flex: 1; display: grid; gap: 1px; min-width: 0; }
+.stat-row-ep { font-weight: 600; }
+.stat-row-body .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.stat-row-avg {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 17px;
+}
+
 /* ------------------------------------------------------------------- setup */
 
 .setup-title { font-size: 30px; }
