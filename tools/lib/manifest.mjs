@@ -25,6 +25,12 @@ export function slugify(s) {
 export const epTag = (season, ep) =>
   `s${String(season).padStart(2, '0')}e${String(ep).padStart(2, '0')}`
 
+/** Season 0 holds OVAs/specials, which belong after the numbered seasons. */
+export const OVA_SEASON = 0
+const seasonRank = (season) => (season === OVA_SEASON ? Infinity : season)
+export const bySeasonThenEp = (a, b) =>
+  seasonRank(a.season) - seasonRank(b.season) || a.ep - b.ep
+
 async function readJson(file, fallback) {
   try {
     return JSON.parse(await fs.readFile(file, 'utf8'))
@@ -56,6 +62,8 @@ export async function mergeManifest({ id, title, episodes }) {
     byKey.set(key, {
       season: incoming.season,
       ep: incoming.ep,
+      // Named entries (OVAs) carry a title; numbered episodes don't need one.
+      ...(incoming.title || prev?.title ? { title: incoming.title ?? prev.title } : {}),
       frames,
       // A skipped re-run reports no timestamps; don't drop the ones we already had.
       times: times.length ? times : (prev?.times?.length === frames.length ? prev.times : []),
@@ -64,7 +72,7 @@ export async function mergeManifest({ id, title, episodes }) {
 
   const ordered = [...byKey.values()]
     .filter((e) => e.frames.length)
-    .sort((a, b) => a.season - b.season || a.ep - b.ep)
+    .sort(bySeasonThenEp)
     .map((e, i) => ({ ...e, abs: i + 1 }))
 
   if (!ordered.length) throw new Error('nothing to write — no frames')
@@ -74,7 +82,9 @@ export async function mergeManifest({ id, title, episodes }) {
     id,
     title: title || existing?.title || id,
     episodeCount: ordered.length,
-    seasons: [...new Set(ordered.map((e) => e.season))].sort((a, b) => a - b),
+    seasons: [...new Set(ordered.map((e) => e.season))].sort(
+      (a, b) => seasonRank(a) - seasonRank(b),
+    ),
     frameCount,
     // Mid-series so the card art isn't always episode 1.
     cover: ordered[Math.floor(ordered.length / 2)].frames[0],

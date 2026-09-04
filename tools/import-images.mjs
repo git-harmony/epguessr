@@ -18,7 +18,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { spawn } from 'node:child_process'
 import sharp from 'sharp'
-import { ROOT, epTag, mergeManifest, slugify } from './lib/manifest.mjs'
+import { OVA_SEASON, ROOT, bySeasonThenEp, epTag, mergeManifest, slugify } from './lib/manifest.mjs'
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp'])
 
@@ -46,6 +46,7 @@ if (!args.input || args.help) {
     '  --title <name>   display title (defaults to the input folder name)',
     '  --id <slug>      url-safe id (defaults to a slug of the title)',
     '  --season <n>     season for names that do not carry one (2x11 already does)  [1]',
+    `  --ova            shorthand for --season ${OVA_SEASON}; named entries land in the OVA group`,
     '  --max <n>        cap frames per episode, spread evenly by timestamp  [all]',
     '  --skip-intro <s> drop frames before this timestamp                          [0]',
     '  --skip-outro <s> drop frames within this many seconds of the episode end   [90]',
@@ -62,7 +63,7 @@ if (!args.input || args.help) {
 
 const CFG = {
   input: path.resolve(String(args.input)),
-  season: Number(args.season ?? 1),
+  season: args.ova ? OVA_SEASON : Number(args.season ?? 1),
   max: args.max ? Number(args.max) : 0,
   skipIntro: Number(args['skip-intro'] ?? 0),
   skipOutro: Number(args['skip-outro'] ?? 90),
@@ -97,10 +98,26 @@ function parseSourceEpisode(name) {
   return epOnly ? { season: null, ep: Number(epOnly[1]) } : null
 }
 
-/** "szn 2" / "Season 02" / "S2" -> 2, for folders whose zips omit the season. */
+/** "szn 2" / "Season 02" / "S2" -> 2; an "ovas"/"specials" folder -> the OVA group. */
 function parseFolderSeason(name) {
-  const m = name.match(/(?:szn|season|series|s)[\s._-]*(\d{1,2})/i)
+  if (/\b(ovas?|specials?|extras?)\b/i.test(name)) return OVA_SEASON
+  const m = name.match(/\b(?:szn|season|series|s)[\s._-]*(\d{1,2})\b/i)
   return m ? Number(m[1]) : null
+}
+
+/**
+ * "Memory snow ova.zip" -> "Memory Snow". Used for entries that carry a name
+ * instead of an episode number, so the game can label them properly.
+ */
+function cleanTitle(name) {
+  return name
+    .replace(/\.zip$/i, '')
+    .replace(/[._]+/g, ' ')
+    // Drop a standalone "ova"/"ovas" token; a word merely containing it survives.
+    .replace(/\bovas?\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 /** A folder holding zips is a season container, not an episode. */
@@ -199,11 +216,12 @@ async function main() {
         continue
       }
       if (!isZip && !e.isDirectory()) continue
+      // No number in the name means a named entry (an OVA); it gets numbered below.
       const parsed = parseSourceEpisode(e.name)
-      if (!parsed) continue
       sources.push({
-        season: parsed.season ?? inherited ?? CFG.season,
-        ep: parsed.ep,
+        season: parsed?.season ?? inherited ?? CFG.season,
+        ep: parsed?.ep ?? null,
+        title: parsed ? undefined : cleanTitle(e.name),
         name: e.name,
         isZip,
         full,
@@ -212,7 +230,24 @@ async function main() {
   }
 
   await collect(CFG.input, parseFolderSeason(path.basename(CFG.input)))
-  sources.sort((a, b) => a.season - b.season || a.ep - b.ep)
+
+  // Named entries get sequential numbers per season, after any numbered ones,
+  // so "Memory Snow" and "Frozen Bond" become OVA 1 and 2 in name order.
+  const named = sources.filter((s) => s.ep === null)
+  if (named.length) {
+    const highest = new Map()
+    for (const s of sources) {
+      if (s.ep === null) continue
+      highest.set(s.season, Math.max(highest.get(s.season) ?? 0, s.ep))
+    }
+    named.sort((a, b) => a.title.localeCompare(b.title))
+    for (const s of named) {
+      const next = (highest.get(s.season) ?? 0) + 1
+      highest.set(s.season, next)
+      s.ep = next
+    }
+  }
+  sources.sort(bySeasonThenEp)
 
   if (!sources.length) {
     console.error(`\n  No per-episode zips or folders found in ${CFG.input}\n`)
@@ -223,7 +258,9 @@ async function main() {
   const dupes = sources.filter((s, i) => sources.findIndex((o) => key(o) === key(s)) !== i)
   console.log(`\n${TITLE}  (id: ${ID})`)
   console.log(`${sources.length} episodes found\n`)
-  for (const s of sources) console.log(`  ${epTagOf(s)}  ${s.name}`)
+  for (const s of sources) {
+    console.log(`  ${epTagOf(s)}  ${s.name}${s.title ? `  -> "${s.title}"` : ''}`)
+  }
   if (dupes.length) {
     console.log(`\n  WARNING: more than one source maps to ${[...new Set(dupes.map(epTagOf))].join(', ')}`)
   }
@@ -250,6 +287,7 @@ async function main() {
           done.push({
             season: src.season,
             ep: src.ep,
+            title: src.title,
             frames: have.sort(byNum).map((f) => `frames/${ID}/${tag}/${f}`),
             times: [],
           })
@@ -316,6 +354,7 @@ async function main() {
       done.push({
         season: src.season,
         ep: src.ep,
+        title: src.title,
         frames: ok.map((s) => s.rel),
         times: ok.map((s) => s.time),
       })

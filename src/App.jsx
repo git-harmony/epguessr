@@ -9,6 +9,8 @@ import {
   epLabel,
   isEndless,
   isMiss,
+  isOva,
+  seasonLabel,
   playableEpisodes,
   seasonsKey,
   hintWindow,
@@ -78,6 +80,7 @@ export default function App() {
       ep: answer.ep,
       distance: entry.distance,
       src: entry.frame?.src,
+      title: answer.title,
     })
   }, [])
 
@@ -324,7 +327,7 @@ function StatList({ title, subtitle, rows, tone }) {
           {r.src ? <img src={asset(r.src)} alt="" loading="lazy" /> : <div className="stat-row-blank" />}
           <div className="stat-row-body">
             <span className="stat-row-ep">
-              {epLabel({ season: r.season, ep: r.ep }, true)}
+              {epLabel({ season: r.season, ep: r.ep, title: r.episodeTitle }, true)}
             </span>
             <span className="muted small">
               {r.title} · {r.attempts} guess{r.attempts === 1 ? '' : 'es'} ·{' '}
@@ -401,9 +404,9 @@ function Setup({ anime, bests, onStart, onExit }) {
                   key={season}
                   className={`chip ${picked.includes(season) ? 'chip-on' : ''}`}
                   onClick={() => toggle(season)}
-                  title={`${count} episodes`}
+                  title={`${count} ${isOva(season) ? 'OVAs' : 'episodes'}`}
                 >
-                  Season {season}
+                  {seasonLabel(season)}
                 </button>
               )
             })}
@@ -540,10 +543,9 @@ function Game({
         <button className="btn ghost" onClick={onExit}>← library</button>
         <div className="hud-title">
           {anime.title}
-          {multiSeason && seasons.length < anime.seasons.length
-            ? <span className="muted"> · seasons {seasons.join(', ')}</span>
-            : null}
-          {seasons.length === 1 ? <span className="muted"> · season {seasons[0]}</span> : null}
+          {seasons.length < anime.seasons.length ? (
+            <span className="muted">{` · ${seasons.map(seasonLabel).join(' + ')}`}</span>
+          ) : null}
         </div>
         <div className="hud-stats">
           <span>
@@ -662,7 +664,7 @@ function EpisodeGrid({ anime, inPlay, multiSeason, selected, onSelect, result, h
     <div className="grid-wrap">
       {groups.map((g) => (
         <section key={g.season ?? 'all'} className="season">
-          {g.season != null ? <h2 className="season-label">Season {g.season}</h2> : null}
+          {g.season != null ? <h2 className="season-label">{seasonLabel(g.season)}</h2> : null}
           <div className="grid">
             {g.episodes.map((e) => {
               const outside = hint && !hint.allowed.has(e.abs)
@@ -675,6 +677,8 @@ function EpisodeGrid({ anime, inPlay, multiSeason, selected, onSelect, result, h
                   classes.push(result.distance <= MAX_PARTIAL_DISTANCE ? 'tile-close' : 'tile-wrong')
                 }
               }
+              // A bare "1" under an OVA heading is unguessable, so name them.
+              if (isOva(e.season) && e.title) classes.push('tile-named')
               return (
                 <button
                   key={e.abs}
@@ -683,7 +687,7 @@ function EpisodeGrid({ anime, inPlay, multiSeason, selected, onSelect, result, h
                   onClick={() => onSelect(e.abs)}
                   title={epLabel(e, multiSeason)}
                 >
-                  {e.ep}
+                  {isOva(e.season) && e.title ? e.title : e.ep}
                 </button>
               )
             })}

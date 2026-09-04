@@ -43,6 +43,20 @@ D:/epguesser - rezero/
 Names that carry their own season win; otherwise the folder name supplies it, falling back to
 `--season`. The dry run prints the full `S01E01` mapping and warns if two sources collide.
 
+### OVAs and specials
+
+An `ovas/` (or `specials/`) folder, or `--ova`, files entries under **season 0**, which the game
+labels **OVA** and sorts after the numbered seasons. Entries there usually have no episode
+number, so the importer numbers them in name order and keeps the cleaned filename as a title:
+
+```
+ovas/Memory snow ova.zip   ->  S00E02  "Memory Snow"
+ovas/Frozen bond ova.zip   ->  S00E01  "Frozen Bond"
+```
+
+Named entries show their title on the guess tile rather than a bare number — "OVA 1" and "OVA 2"
+would be unguessable — and read as `OVA: Memory Snow` in the reveal and the statistics table.
+
 Screenshots at the same second are treated as the same moment and deduped. `--max` thins what's
 left down to an even spread across the episode, which is how you keep the pack hostable:
 
@@ -147,7 +161,8 @@ chosen seasons are dealt and only they appear in the guess grid.
 
 Distance is still measured in absolute episode index across the whole series, so a cross-season
 guess between non-adjacent selections scores zero rather than accidental partial credit. When one
-season is in play the labels drop the redundant season half and read "Episode 12".
+season is in play the labels drop the redundant season half and read "Episode 12". An OVA group
+appears as its own selectable category alongside the seasons.
 
 Past 40 episodes in play the layout switches to a denser grid and a smaller frame, so the whole
 grid still fits on screen instead of pushing later seasons below the fold.

@@ -43,10 +43,18 @@ export function verdictFor(distance) {
   return { label: `${distance} episodes off`, tone: 'miss' }
 }
 
+/** Season 0 is the OVA/specials group, shown as "OVA" rather than "Season 0". */
+export const OVA_SEASON = 0
+export const isOva = (season) => season === OVA_SEASON
+export const seasonLabel = (season) => (isOva(season) ? 'OVA' : `Season ${season}`)
+
 // Spelled out rather than S02E05 — the season half is only worth saying when
-// the series actually has more than one.
-export const epLabel = (e, multiSeason = true) =>
-  (multiSeason ? `Season ${e.season}, Episode ${e.ep}` : `Episode ${e.ep}`)
+// the series actually has more than one. OVAs go by name, since "OVA, Episode 2"
+// says nothing useful.
+export const epLabel = (e, multiSeason = true) => {
+  if (isOva(e.season)) return e.title ? `OVA: ${e.title}` : `OVA ${e.ep}`
+  return multiSeason ? `Season ${e.season}, Episode ${e.ep}` : `Episode ${e.ep}`
+}
 
 /**
  * Every (episode, frame) pair in a manifest, flattened into a draw pool.

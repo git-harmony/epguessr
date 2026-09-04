@@ -35,8 +35,9 @@ function persist(stats) {
  * @param {number} round.ep
  * @param {number} round.distance  episodes between the guess and the answer
  * @param {string} [round.src]     frame shown, kept as a thumbnail for the table
+ * @param {string} [round.title]   episode name, for entries that go by name (OVAs)
  */
-export function recordRound({ animeId, season, ep, distance, src }) {
+export function recordRound({ animeId, season, ep, distance, src, title }) {
   const stats = loadStats()
   const key = statKey(animeId, season, ep)
   const rec = stats[key] ?? emptyRecord(season, ep)
@@ -44,6 +45,7 @@ export function recordRound({ animeId, season, ep, distance, src }) {
   rec.d += distance
   if (distance === 0) rec.x += 1
   if (src) rec.src = src
+  if (title) rec.t = title
   stats[key] = rec
   return persist(stats)
 }
@@ -71,6 +73,7 @@ export function statRows(stats, titles = {}) {
         title: titles[animeId] ?? animeId,
         season: rec.s,
         ep: rec.e,
+        episodeTitle: rec.t,
         attempts,
         exact: Number(rec.x) || 0,
         avgDistance: (Number(rec.d) || 0) / attempts,
