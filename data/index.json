@@ -1,0 +1,18 @@
+{
+  "animes": [
+    {
+      "id": "rezero",
+      "title": "Re:Zero - Starting Life in Another World",
+      "cover": "frames/rezero/s02e17/0.jpg",
+      "episodeCount": 83,
+      "seasons": [
+        1,
+        2,
+        3,
+        4,
+        0
+      ],
+      "frameCount": 4094
+    }
+  ]
+}
